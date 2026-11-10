@@ -7,8 +7,9 @@ from .stream_data_generator import StreamDataGenerator
 from .stream_data_verifier import StreamDataVerifier
 from datetime import datetime
 import time
-from typing import Callable
+from typing import Callable, Optional
 from pathlib import Path
+from streaming_engine import StreamingEngine
 
 
 class Application:
@@ -21,6 +22,7 @@ class Application:
         "stream_data_verifier",
         "data_stream_logger",
         "received_file",
+        "streaming_engine",
     )
 
     logger: SystemLogger
@@ -31,6 +33,7 @@ class Application:
     stream_data_verifier: StreamDataVerifier
     data_stream_logger: DataStreamLogger
     received_file: File | None
+    streaming_engine: StreamingEngine
 
     def __init__(
         self,
@@ -40,6 +43,7 @@ class Application:
         stream_data_generator: StreamDataGenerator,
         stream_data_verifier: StreamDataVerifier,
         data_stream_logger: DataStreamLogger,
+        streaming_engine: StreamingEngine | None = None,
     ):
         self.logger = logger
         self.loaded_file = None
@@ -49,6 +53,9 @@ class Application:
         self.stream_data_verifier = stream_data_verifier
         self.data_stream_logger = data_stream_logger
         self.received_file = None
+        self.streaming_engine = (
+            streaming_engine if streaming_engine is not None else StreamingEngine()
+        )
 
     def load_file(self, path: str):
         self.logger.log_event(f"[INFO]: Load file {path}")
@@ -83,14 +90,36 @@ class Application:
         time.sleep(5)  # replace with send via LoRa
         self.logger.log_event("[INFO]: File sent")
 
-    def start_sending_stream_data(self, report_sending_data: Callable[[int], None]):
+    def start_sending_stream_data(
+        self,
+        report_sending_data: Callable[[int], None],
+        delay: float = 1.0,
+        skip_pattern: int | None = None,
+    ):
+        """
+        Kirim data streaming angka 1-100 secara loop melalui LoRa/transport.
+        """
         self.logger.log_event("[INFO]: Start sending stream data")
         self.stream_data_generator.reset()
-        while True:
-            current_data = self.stream_data_generator.get_data()
-            self.logger.log_event(f"[INFO]: Sending stream data: {current_data}")
-            report_sending_data(current_data)
-            time.sleep(1)  # replace with send with LoRa
+        self.streaming_engine.open(is_receiver=False)
+        try:
+            while True:
+                current_data = self.stream_data_generator.get_data()
+
+                # Jika mode simulasi packet loss aktif, lewati angka tertentu
+                if skip_pattern is not None and current_data % skip_pattern == 0:
+                    self.logger.log_event(
+                        f"[SIMULASI LOSS]: Melewati angka {current_data} (packet loss disengaja)"
+                    )
+                    time.sleep(delay)
+                    continue
+
+                self.logger.log_event(f"[INFO]: Sending stream data: {current_data}")
+                self.streaming_engine.send_stream_data(current_data)
+                report_sending_data(current_data)
+                time.sleep(delay)
+        finally:
+            self.streaming_engine.close()
 
     def start_receiving_file(self):
         self.logger.log_event("[INFO]: Start receiving file")
@@ -119,25 +148,98 @@ class Application:
         return crc_result
 
     def start_receiving_stream_data(
-        self, report_receiving_data: Callable[[int, bool], None]
+        self,
+        report_receiving_data: Callable[..., None],
+        report_alarm: Optional[Callable[[str, list[int], Optional[int], Optional[int]], None]] = None,
     ):
+        """
+        Menerima data stream live dari transport dan memicu alarm jika ada data yang hilang.
+        """
         self.logger.log_event("[INFO]: Start receiving stream data")
         self.data_stream_logger.start_session()
         self.stream_data_verifier.reset()
-        temp_data = 0  # remove later
+        self.streaming_engine.open(is_receiver=True)
+
+        try:
+            while True:
+                received_data, err = self.streaming_engine.receive_stream_data(timeout=1.0)
+                if received_data is None:
+                    if err:
+                        self.logger.log_event(f"[ALARM/ERROR]: Paket rusak - {err}")
+                        if report_alarm:
+                            report_alarm(f"Paket Rusak: {err}", [], None, None)
+                    continue
+
+                is_valid, missing, expected = self.stream_data_verifier.check_missing(received_data)
+
+                if not is_valid:
+                    self.logger.log_event(
+                        f"[ALARM]: Data hilang terdeteksi! Diharapkan: {expected}, Diterima: {received_data}, Hilang: {missing}"
+                    )
+                    if report_alarm:
+                        report_alarm("Data Hilang Terdeteksi", missing, expected, received_data)
+
+                try:
+                    report_receiving_data(received_data, is_valid, missing, expected)
+                except TypeError:
+                    report_receiving_data(received_data, is_valid)
+
+                notes = (
+                    f"ALARM_DATA_HILANG: missing {missing} (expected {expected})"
+                    if not is_valid and missing
+                    else ("OK" if is_valid else "INVALID")
+                )
+                self.data_stream_logger.log(data=received_data, is_valid=is_valid, notes=notes)
+
+                self.logger.log_event(
+                    f"[INFO]: Received stream data: {received_data} {'' if is_valid else '(INVALID)'}"
+                )
+        finally:
+            self.streaming_engine.close()
+
+    def start_receiving_stream_simulation(
+        self,
+        report_receiving_data: Callable[..., None],
+        report_alarm: Optional[Callable[[str, list[int], Optional[int], Optional[int]], None]] = None,
+    ):
+        """
+        Mode simulasi stream receive lokal dengan simulasi packet loss untuk menguji alarm.
+        """
+        self.logger.log_event("[INFO]: Start receiving stream data (Simulation Mode)")
+        self.data_stream_logger.start_session()
+        self.stream_data_verifier.reset()
+        temp_data = 0
+
         while True:
-            # replace with receive data via Lora
             time.sleep(1)
-            # received_data must be int
             received_data = temp_data + 1
 
-            if temp_data % 5 == 0:  # remove later
-                temp_data = temp_data + 1  # remove later
-            temp_data = (temp_data + 1) % 100  # remove later
+            # Buat lompatan data (simulasi paket hilang pada kelipatan 5)
+            if temp_data > 0 and temp_data % 5 == 0:
+                temp_data = temp_data + 2  # melompati data untuk memicu alarm
+            else:
+                temp_data = (temp_data + 1) % 100
 
-            is_valid = self.stream_data_verifier.verify(received_data)
-            report_receiving_data(received_data, is_valid)
-            self.data_stream_logger.log(data=received_data, is_valid=is_valid)
+            is_valid, missing, expected = self.stream_data_verifier.check_missing(received_data)
+
+            if not is_valid:
+                self.logger.log_event(
+                    f"[ALARM]: (Simulasi) Data hilang! Diharapkan: {expected}, Diterima: {received_data}, Hilang: {missing}"
+                )
+                if report_alarm:
+                    report_alarm("Data Hilang (Simulasi)", missing, expected, received_data)
+
+            try:
+                report_receiving_data(received_data, is_valid, missing, expected)
+            except TypeError:
+                report_receiving_data(received_data, is_valid)
+
+            notes = (
+                f"ALARM_DATA_HILANG: missing {missing} (expected {expected})"
+                if not is_valid and missing
+                else ("OK" if is_valid else "INVALID")
+            )
+            self.data_stream_logger.log(data=received_data, is_valid=is_valid, notes=notes)
             self.logger.log_event(
                 f"[INFO]: Received stream data: {received_data} {'' if is_valid else '(INVALID)'}"
             )

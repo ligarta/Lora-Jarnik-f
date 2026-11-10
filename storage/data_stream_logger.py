@@ -17,10 +17,14 @@ class DataStreamLogger:
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write("timestamp,received_data,notes\n")
 
-    def log(self, data: int, is_valid: bool):
+    def log(self, data: int, is_valid: bool, notes: str = ""):
         if self.log_path == None:
             self.start_session()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_line = f"{timestamp},{data},{f"INVALID" if not is_valid else ""}\n"
+        if not notes:
+            notes = "INVALID" if not is_valid else "OK"
+        # Escape quotes if comma is present in notes
+        cleaned_notes = f'"{notes}"' if "," in notes else notes
+        log_line = f"{timestamp},{data},{cleaned_notes}\n"
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write(log_line)

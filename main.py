@@ -1,4 +1,6 @@
 from transport import SdrUdpTransport, SerialTransport
+from protocol import create_packets, decode_packet, reassemble_packets
+from streaming_engine import StreamingEngine
 from ui.ui_screen import UIScreen
 
 from storage.system_logger import SystemLogger
@@ -16,6 +18,7 @@ crc32_calculator = CRC32Calculator()
 stream_data_generator = StreamDataGenerator()
 data_stream_logger = DataStreamLogger()
 stream_data_verifier = StreamDataVerifier()
+streaming_engine = StreamingEngine()
 
 application = Application(
     logger=system_logger,
@@ -24,8 +27,9 @@ application = Application(
     stream_data_generator=stream_data_generator,
     data_stream_logger=data_stream_logger,
     stream_data_verifier=stream_data_verifier,
+    streaming_engine=streaming_engine,
 )
 
 ui_screen = UIScreen(application=application)
-ui_screen.show()
-from protocol import create_packets, decode_packet, reassemble_packets
+if __name__ == "__main__":
+    ui_screen.show()
