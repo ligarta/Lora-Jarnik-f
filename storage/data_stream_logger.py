@@ -21,6 +21,7 @@ class DataStreamLogger:
         if self.log_path == None:
             self.start_session()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_line = f"{timestamp},{data},{f"INVALID" if not is_valid else ""}\n"
+        status = "INVALID" if not is_valid else ""
+        log_line = f"{timestamp},{data},{status}\n"
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write(log_line)

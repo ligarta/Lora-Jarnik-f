@@ -1,5 +1,9 @@
 import socket
 import time
+import subprocess
+import sys
+import shutil
+from pathlib import Path
 
 try:
     import serial
@@ -87,3 +91,113 @@ class SerialTransport(BaseTransport):
                 self.ser.close()
             except Exception:
                 pass
+
+
+class LoraSdrTransport:
+    def __init__(self, txvga=20, lna=24, vga=20, bw="125e3", sf=7):
+        self.txvga = str(txvga)
+        self.lna = str(lna)
+        self.vga = str(vga)
+        self.bw = str(bw)
+        self.sf = str(sf)
+        self.lab_script = self._find_lab_script()
+        self.has_hackrf = shutil.which("hackrf_transfer") is not None
+        self.iq_file = "logs/simulated_lora.iq"
+        Path("logs").mkdir(parents=True, exist_ok=True)
+
+    def _find_lab_script(self):
+        base = Path(__file__).resolve().parent
+        cand1 = base / "LoRa_SDR-main" / "LoRa_SDR-main" / "lora_lab.py"
+        if cand1.exists():
+            return cand1
+        cand2 = base / "LoRa_SDR-main" / "lora_lab.py"
+        if cand2.exists():
+            return cand2
+        cand3 = base / "lora_lab.py"
+        if cand3.exists():
+            return cand3
+        return cand1
+
+    def send_file(self, filepath: str):
+        cmd = [
+            sys.executable,
+            str(self.lab_script),
+            "send-file",
+            str(filepath),
+            "--txvga",
+            self.txvga,
+            "--bw",
+            self.bw,
+            "--sf",
+            self.sf,
+            "--no-duty-limit",
+        ]
+        if not self.has_hackrf:
+            cmd += ["--iq", self.iq_file]
+        return subprocess.run(cmd)
+
+    def receive_file(self, outdir="logs/received"):
+        Path(outdir).mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            str(self.lab_script),
+            "recv",
+            "--lna",
+            self.lna,
+            "--vga",
+            self.vga,
+            "--bw",
+            self.bw,
+            "--sf",
+            self.sf,
+            "--out",
+            str(outdir),
+        ]
+        if not self.has_hackrf and Path(self.iq_file).exists():
+            cmd += ["--iq", self.iq_file]
+        return subprocess.run(cmd)
+
+    def send_stream(self, val: int):
+        cmd = [
+            sys.executable,
+            str(self.lab_script),
+            "send-text",
+            f"STREAM:{val}",
+            "--txvga",
+            self.txvga,
+            "--bw",
+            self.bw,
+            "--sf",
+            self.sf,
+            "--no-duty-limit",
+        ]
+        if not self.has_hackrf:
+            cmd += ["--iq", self.iq_file]
+        return subprocess.run(cmd)
+
+    def start_receiver_process(self, outdir="logs/received"):
+        Path(outdir).mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            str(self.lab_script),
+            "recv",
+            "--lna",
+            self.lna,
+            "--vga",
+            self.vga,
+            "--bw",
+            self.bw,
+            "--sf",
+            self.sf,
+            "--out",
+            str(outdir),
+        ]
+        if not self.has_hackrf and Path(self.iq_file).exists():
+            cmd += ["--iq", self.iq_file]
+        return subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )

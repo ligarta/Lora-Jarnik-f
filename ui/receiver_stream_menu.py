@@ -48,4 +48,5 @@ class ReceiverStreamMenu:
         )
 
     def _print_received_data(self, data: int, is_valid: bool):
-        print(f"Received: {data}{" (INVALID)" if not is_valid else ""}")
+        status = " (INVALID)" if not is_valid else ""
+        print(f"Received: {data}{status}")

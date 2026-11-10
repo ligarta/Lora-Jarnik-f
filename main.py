@@ -1,4 +1,4 @@
-from transport import SdrUdpTransport, SerialTransport
+from transport import SdrUdpTransport, SerialTransport, LoraSdrTransport
 from ui.ui_screen import UIScreen
 
 from storage.system_logger import SystemLogger
@@ -16,6 +16,7 @@ crc32_calculator = CRC32Calculator()
 stream_data_generator = StreamDataGenerator()
 data_stream_logger = DataStreamLogger()
 stream_data_verifier = StreamDataVerifier()
+transport = LoraSdrTransport()
 
 application = Application(
     logger=system_logger,
@@ -24,8 +25,8 @@ application = Application(
     stream_data_generator=stream_data_generator,
     data_stream_logger=data_stream_logger,
     stream_data_verifier=stream_data_verifier,
+    transport=transport,
 )
 
 ui_screen = UIScreen(application=application)
 ui_screen.show()
-from protocol import create_packets, decode_packet, reassemble_packets
